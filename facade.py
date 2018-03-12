@@ -1,7 +1,9 @@
 import math
 import matplotlib.pyplot as plt
+from torch.nn.modules.loss import _Loss, _assert_no_grad
+
 from data_creator import DataCreator
-from vague_net import VagueNet
+from vague_net import VagueNet, VagueLoss
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -11,7 +13,7 @@ import torch.optim as optim
 
 class Facade:
 
-    K_NUM_DATA = 10000
+    K_NUM_DATA = 1000
 
     def __init__(self):
         self.creator = DataCreator()
@@ -20,13 +22,9 @@ class Facade:
         self.net = VagueNet()
 
     def run(self):
-        # print(self.net)
-        # input = Variable(torch.randn(5, 2))
-        # out = self.net(input)
-        # print(out)
 
         # Loss Function
-        criterion = nn.MSELoss()
+        criterion = VagueLoss()
         optimizer = optim.SGD(self.net.parameters(), lr=0.001, momentum=0.9)
 
         train_set, test_set = self.creator.get_train_test(self.dataset_a, self.dataset_b)
@@ -43,19 +41,14 @@ class Facade:
                 labels = train_batch[:, 2]
 
                 features, labels = Variable(torch.from_numpy(features)), Variable(torch.from_numpy(labels))
-                # print(features)
-                # print(labels)
                 optimizer.zero_grad()
 
-                # forward + backward + optimize
-                outputs = self.net(features)
-                loss = criterion(outputs, labels)
+                outputs, w = self.net(features)
+                loss = criterion(outputs, labels, w)
                 loss.backward()
                 optimizer.step()
-
-                # print(loss)
-
-            pass
+                print(loss)
+                print("W: {}".format(w))
 
         correct_x = []
         correct_y = []
@@ -69,12 +62,12 @@ class Facade:
             test_x = test_data[:2]
             test_label = test_data[2]
             x = Variable(torch.from_numpy(test_x))
-            result = self.net(x)
+            result, w = self.net(x)
             result = round(result.data[0])
-            print(result)
+            # print(result)
 
             is_correct = result == int(test_label)
-            print(is_correct)
+            # print(is_correct)
             if is_correct:
                 correct_count += 1
                 correct_x.append(test_x[0])
@@ -84,7 +77,7 @@ class Facade:
                 wrong_y.append(test_x[1])
                 pass
 
-        print(correct_count/len(test_set))
+        print("Correct: {:.0f}%".format(100 * correct_count/len(test_set)))
         plt.plot(correct_x, correct_y, "gx")
         plt.plot(wrong_x, wrong_y, "rx")
         plt.show()
