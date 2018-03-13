@@ -22,7 +22,7 @@ class VagueLoss(_Loss):
         if m is None:
             return first_loss
         else:
-            return first_loss * m + first_loss * a
+            return first_loss * m + (1 - x) * a
 
     def vanilla_loss(self, x, y):
         return (x - y) ** 2
@@ -43,9 +43,9 @@ class VagueNet(nn.Module):
         self.fc2 = nn.Linear(3, 3)
         self.fc3 = nn.Linear(3, 1)
 
-        self.fc4 = nn.Linear(2, 3)
-        self.fc5 = nn.Linear(3, 3)
-        self.fc6 = nn.Linear(3, 1)
+        self.fc4 = nn.Linear(2, 5)
+        self.fc5 = nn.Linear(5, 5)
+        self.fc6 = nn.Linear(5, 1)
         self.s = nn.Sigmoid()
 
         self.n1_params = []

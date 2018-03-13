@@ -50,7 +50,10 @@ class Facade:
                 p_optimizer.step()
                 print("Loss: {}".format(loss.data[0]))
 
-        for epoch in range(50):
+        # Train a GAN
+
+
+        for epoch in range(100):
 
             batch_size = 10
             batch_steps = int(math.floor(len(train_set) // batch_size))
@@ -70,28 +73,30 @@ class Facade:
                 cmp = []
                 mask_list = []
                 a_mask_list = []
-                penalty_weight_wrong = 3
-                penalty_weight_correct = 1
+                penalty_weight_wrong = 0
+                penalty_weight_correct = 0
 
                 for i in range(len(p.data)):
                     p_i = p.data[i]
                     l_i = labels.data[i]
                     p_f = round(p_i)
+                    thres = 0.2
+                    if p_i < 0.5 - thres or p_i > 0.5 + thres:
+                        add_mask_weight = 1
+                    else:
+                        add_mask_weight = 0
+
                     result = 1 if p_f == l_i else 0
                     mask_weight = penalty_weight_correct if p_f == l_i else penalty_weight_wrong
-                    add_mask_weight = 1 if p_f == l_i else 0
 
                     cmp.append(result)
                     mask_list.append(mask_weight)
-                    a_mask_list.append(mask_weight)
+                    a_mask_list.append(add_mask_weight)
 
                 q = Variable(torch.Tensor(cmp))
                 m = Variable(torch.Tensor(mask_list))
                 a = Variable(torch.Tensor(a_mask_list))
 
-                # p.data = p.data.view(10)
-                # q = (p - labels) ** 2
-                # q = q.detach()
                 loss = c_criterion(c, q, m, a)
                 loss.backward()
                 c_optimizer.step()
@@ -117,12 +122,16 @@ class Facade:
             result, w = self.net(x)
             print("Result: {} | {}".format(result.data[0], w.data[0]))
 
-            if w.data[0] < 0.5:
+            p = result.data[0]
+            skip = 0.25 < p < 0.75
+
+            c = w.data[0]
+            if c < 0.5 or skip:
                 skipped_x.append(test_x[0])
                 skipped_y.append(test_x[1])
                 continue
 
-            result = round(result.data[0])
+            result = round(p)
             # print(result)
 
             running_count += 1
