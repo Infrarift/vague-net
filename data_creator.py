@@ -8,7 +8,6 @@ class DataCreator:
 
     @staticmethod
     def get_train_test(set_a, set_b):
-
         complete_set = np.concatenate((set_a, set_b), axis=0)
         np.random.shuffle(complete_set)
         split_index = int(len(complete_set) * 0.7)
@@ -19,14 +18,19 @@ class DataCreator:
 
     @staticmethod
     def data_function_a(x):
-        start = 1
-        f_range = 8
+        # chance = random.random()
+        # if chance > 0.5:
+        #     start = 0
+        # else:
+        #     start = 6
+        start = 0
+        f_range = 6
         return start + random.random() * f_range
 
     @staticmethod
     def data_function_b(x):
-        start = 5
-        f_range = 7
+        start = 3
+        f_range = 6
         return start + random.random() * f_range
 
     @staticmethod
@@ -42,6 +46,6 @@ class DataCreator:
 
     @staticmethod
     def get_dataset_x_y(data_set):
-        x = [d[0][0] for d in data_set]
-        y = [d[0][1] for d in data_set]
+        x = data_set[:, 0]
+        y = data_set[:, 1]
         return x, y

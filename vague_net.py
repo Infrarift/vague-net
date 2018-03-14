@@ -22,7 +22,7 @@ class VagueLoss(_Loss):
         if m is None:
             return first_loss
         else:
-            return first_loss * m + (1 - x) * a
+            return first_loss * m
 
     def vanilla_loss(self, x, y):
         return (x - y) ** 2
@@ -36,27 +36,35 @@ class VagueLoss(_Loss):
 
 
 class VagueNet(nn.Module):
-
     def __init__(self):
         super(VagueNet, self).__init__()
-        self.fc1 = nn.Linear(2, 3)
-        self.fc2 = nn.Linear(3, 3)
-        self.fc3 = nn.Linear(3, 1)
 
-        self.fc4 = nn.Linear(2, 5)
-        self.fc5 = nn.Linear(5, 5)
-        self.fc6 = nn.Linear(5, 1)
-        self.s = nn.Sigmoid()
+        self.networks = []
+        self.params = []
 
-        self.n1_params = []
-        self.add_params(self.n1_params, self.fc1)
-        self.add_params(self.n1_params, self.fc2)
-        self.add_params(self.n1_params, self.fc3)
+        # First network
+        self.create_network(2, (4, 4, 4, 2))
 
-        self.n2_params = []
-        self.add_params(self.n2_params, self.fc4)
-        self.add_params(self.n2_params, self.fc5)
-        self.add_params(self.n2_params, self.fc6)
+        # Second network
+        self.create_network(2, (4, 4, 4, 2))
+
+        # self.s = nn.Sigmoid()
+
+    def create_network(self, start_size=2, layer_list=None):
+
+        network = []
+        params = []
+        previous_size = start_size
+
+        for i in range(len(layer_list)):
+            layer = nn.Linear(previous_size, layer_list[i])
+            previous_size = layer_list[i]
+            network.append(layer)
+            self.add_params(params, layer)
+
+        self.networks.append(network)
+        self.params.append(params)
+        return network, params
 
     @staticmethod
     def add_params(param_list, nn_module):
@@ -64,17 +72,13 @@ class VagueNet(nn.Module):
             param_list.append(p)
 
     def forward(self, x):
-
-        p = self.fc1(x)
-        p = self.fc2(p)
-        p = self.fc3(p)
-        p = self.s(p)
-
-        c = self.fc4(x)
-        c = self.fc5(c)
-        c = self.fc6(c)
-        c = self.s(c)
-
+        p = self.net_forward(x, self.networks[0])
+        c = self.net_forward(x, self.networks[1])
         return p, c
 
-
+    def net_forward(self, x, layers):
+        for layer in layers:
+            x = layer(x)
+            if layer == layers[-2]:
+                x = F.tanh(x)
+        return x

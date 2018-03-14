@@ -1,7 +1,7 @@
 import math
 import matplotlib.pyplot as plt
 from torch.nn.modules.loss import _Loss, _assert_no_grad
-
+import numpy as np
 from data_creator import DataCreator
 from vague_net import VagueNet, VagueLoss
 import torch
@@ -13,26 +13,47 @@ import torch.optim as optim
 
 class Facade:
 
-    K_NUM_DATA = 1000
+    K_NUM_DATA = 3000
 
     def __init__(self):
         self.creator = DataCreator()
         self.dataset_a = self.creator.create_data_set(self.creator.data_function_a, 0, self.K_NUM_DATA)
         self.dataset_b = self.creator.create_data_set(self.creator.data_function_b, 1, self.K_NUM_DATA)
+        self.plot_original_sets()
         self.net = VagueNet()
 
     def run(self):
 
-        # Loss Function
-        criterion = nn.MSELoss()
+        # Loss Functions
+        p_criterion = nn.MSELoss()
         c_criterion = VagueLoss()
-        p_optimizer = optim.SGD(self.net.n1_params, lr=0.001, momentum=0.9)
-        c_optimizer = optim.SGD(self.net.n2_params, lr=0.001, momentum=0.1)
+        e_loss = nn.CrossEntropyLoss()
+
+        # Optimizers
+        p_optimizer = optim.SGD(self.net.params[0], lr=0.002, momentum=0.9)
+        c_optimizer = optim.SGD(self.net.params[1], lr=0.002, momentum=0.9)
+
+        # Declare data-sets.
         train_set, test_set = self.creator.get_train_test(self.dataset_a, self.dataset_b)
 
-        for epoch in range(50):
+        # Train the raw network to recognize the classes.
+        self.train_first_net(epochs=100, train_set=train_set, optimizer=p_optimizer, criterion=e_loss)
+        self.evaluate(test_set, test_confidence=False, mask=False, title="1st Net Evaluation")
 
-            batch_size = 10
+        # Create a sub-sample for secondary training.
+        sub_samples = self.create_sub_sample(train_set)
+
+        # Train Second Net.
+        self.train_second_net(epochs=100, train_set=sub_samples, optimizer=c_optimizer, criterion=e_loss)
+        self.evaluate(sub_samples, test_confidence=True, mask=False, title="2nd Net Evaluation")
+
+        # Evaluate results.
+        self.evaluate(test_set, test_confidence=False, mask=True, title="Final Evaluation")
+
+    def train_first_net(self, epochs, train_set, optimizer, criterion):
+        for epoch in range(epochs):
+
+            batch_size = 50
             batch_steps = int(math.floor(len(train_set) // batch_size))
 
             for i in range(batch_steps):
@@ -41,19 +62,29 @@ class Facade:
                 features = train_batch[:, :2]
                 labels = train_batch[:, 2]
 
-                features, labels = Variable(torch.from_numpy(features)), Variable(torch.from_numpy(labels))
-                p_optimizer.zero_grad()
+                one_hot_labels = self.create_one_hot(labels, 2)
+                features, labels = Variable(torch.from_numpy(features)), Variable(torch.from_numpy(one_hot_labels))
+                optimizer.zero_grad()
 
                 p, c = self.net(features)
-                loss = criterion(p, labels)
+                # print("Output: {}".format(p))
+                # print("Target: {}".format(torch.max(labels, 1)[1]))
+                loss = criterion(p, torch.max(labels, 1)[1])
                 loss.backward()
-                p_optimizer.step()
+                optimizer.step()
                 print("Loss: {}".format(loss.data[0]))
 
-        # Train a GAN
+    def create_one_hot(self, labels, num_classes):
+        num_samples = len(labels)
+        labels_array = np.zeros((num_samples, num_classes), np.long)
+        for i in range(num_samples):
+            label = int(labels[i])
+            labels_array[i, label] = 1
+        return labels_array
 
+    def train_second_net(self, epochs, train_set, optimizer, criterion):
 
-        for epoch in range(100):
+        for epoch in range(epochs):
 
             batch_size = 10
             batch_steps = int(math.floor(len(train_set) // batch_size))
@@ -64,46 +95,76 @@ class Facade:
                 features = train_batch[:, :2]
                 labels = train_batch[:, 2]
 
-                label_tensor = torch.from_numpy(labels)
+                one_hot_labels = self.create_one_hot(labels, 2)
+                label_tensor = torch.from_numpy(one_hot_labels)
                 features, labels = Variable(torch.from_numpy(features)), Variable(label_tensor)
-                c_optimizer.zero_grad()
+                optimizer.zero_grad()
 
                 p, c = self.net(features)
-                p.data = p.data.view(batch_size)
-                cmp = []
-                mask_list = []
-                a_mask_list = []
-                penalty_weight_wrong = 0
-                penalty_weight_correct = 0
+                # p.data = p.data.view(batch_size)
+                # cmp = []
+                # q = Variable(torch.Tensor(cmp))
+                # m = Variable(torch.Tensor(mask_list))
+                # a = Variable(torch.Tensor(a_mask_list))
 
-                for i in range(len(p.data)):
-                    p_i = p.data[i]
-                    l_i = labels.data[i]
-                    p_f = round(p_i)
-                    thres = 0.2
-                    if p_i < 0.5 - thres or p_i > 0.5 + thres:
-                        add_mask_weight = 1
-                    else:
-                        add_mask_weight = 0
-
-                    result = 1 if p_f == l_i else 0
-                    mask_weight = penalty_weight_correct if p_f == l_i else penalty_weight_wrong
-
-                    cmp.append(result)
-                    mask_list.append(mask_weight)
-                    a_mask_list.append(add_mask_weight)
-
-                q = Variable(torch.Tensor(cmp))
-                m = Variable(torch.Tensor(mask_list))
-                a = Variable(torch.Tensor(a_mask_list))
-
-                loss = c_criterion(c, q, m, a)
+                loss = criterion(c, torch.max(labels, 1)[1])
                 loss.backward()
-                c_optimizer.step()
+                optimizer.step()
                 print("Loss 2: {}".format(loss.data[0]))
 
-        print("Net Training Complete")
+        print("Net 2 Training Complete")
 
+
+
+    def create_sub_sample(self, train_set):
+
+        positive_samples = []
+        negative_samples = []
+
+        # Use the net to predict the training data.
+        for i in range(len(train_set)):
+            train_data = train_set[i]
+            features = train_data[:2]
+            label = train_data[2]
+            x = Variable(torch.from_numpy(features))
+            p, c = self.net(x)
+            result = torch.max(p.data, 0)[1][0]
+            is_correct = result == int(label)
+            if is_correct:
+                positive_samples.append(features)
+            else:
+                negative_samples.append(features)
+
+        # Normalize the size of the two sets.
+        size = min(len(positive_samples), len(negative_samples))
+        print("Pos: {} | Neg: {} | Resample: {}".format(len(positive_samples), len(negative_samples), size))
+
+        final_samples = np.zeros((size * 2, 3), np.float32)
+        for i in range(size):
+            j = i * 2
+            final_samples[j][0] = positive_samples[i][0]
+            final_samples[j][1] = positive_samples[i][1]
+            final_samples[j][2] = 1
+
+            final_samples[j + 1][0] = negative_samples[i][0]
+            final_samples[j + 1][1] = negative_samples[i][1]
+            final_samples[j + 1][2] = 0
+
+        # Plot the output samples.
+        pos_x = [sample[0] for sample in positive_samples[:size]]
+        pos_y = [sample[1] for sample in positive_samples[:size]]
+
+        neg_x = [sample[0] for sample in negative_samples[:size]]
+        neg_y = [sample[1] for sample in negative_samples[:size]]
+
+        plt.plot(pos_x, pos_y, "g.")
+        plt.plot(neg_x, neg_y, "rx")
+        plt.title("Sub Sample")
+        plt.show()
+
+        return final_samples
+
+    def evaluate(self, test_set, test_confidence=False, mask=True, title="Evaluation"):
         correct_x = []
         correct_y = []
         wrong_x = []
@@ -119,24 +180,25 @@ class Facade:
             test_x = test_data[:2]
             test_label = test_data[2]
             x = Variable(torch.from_numpy(test_x))
-            result, w = self.net(x)
-            print("Result: {} | {}".format(result.data[0], w.data[0]))
+            p_out, c_out = self.net(x)
 
-            p = result.data[0]
-            skip = 0.25 < p < 0.75
+            p = torch.max(p_out.data, 0)[1][0]
+            c = torch.max(c_out.data, 0)[1][0]  # round(c_out.data[0])
+            # c_value = c[0]
 
-            c = w.data[0]
-            if c < 0.5 or skip:
+            if mask and c < 0.5:
                 skipped_x.append(test_x[0])
                 skipped_y.append(test_x[1])
                 continue
 
-            result = round(p)
-            # print(result)
+            if test_confidence:
+                f = c
+            else:
+                f = p
 
             running_count += 1
-            is_correct = result == int(test_label)
-            # print(is_correct)
+            is_correct = test_label == int(f)
+
             if is_correct:
                 correct_count += 1
                 correct_x.append(test_x[0])
@@ -146,10 +208,19 @@ class Facade:
                 wrong_y.append(test_x[1])
                 pass
 
-        print("Correct: {:.0f}%".format(100 * correct_count/running_count))
+        full_count = len(test_set)
+        correct_final = "{:.2f}%".format(100 * correct_count / running_count)
+        discard_final = "{:.2f}%".format(100 * (full_count - running_count) / full_count)
+        raw_correct_final = "{:.2f}%".format(100 * correct_count / full_count)
+
+        print("Correct (Filtered): {}".format(correct_final))
+        print("Correct (Total): {}".format(raw_correct_final))
+        print("Discarded: {}".format(discard_final))
+
         plt.plot(correct_x, correct_y, "gx")
         plt.plot(wrong_x, wrong_y, "rx")
         plt.plot(skipped_x, skipped_y, "bx", color=(0.8, 0.8, 0.8))
+        plt.title(title)
         plt.show()
 
     def plot_original_sets(self):
